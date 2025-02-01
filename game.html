@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Lodhia's Space Invaders Math</title>
+  <style>
+    body {
+      margin: 0;
+      background: #000;
+      color: #fff;
+      font-family: Arial, sans-serif;
+      text-align: center;
+    }
+    #menu {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #222;
+      padding: 20px;
+      border: 2px solid #555;
+      border-radius: 8px;
+    }
+    #menu h1 {
+      margin-top: 0;
+    }
+    #options {
+      margin-bottom: 20px;
+    }
+    .op-buttons label {
+      display: inline-block;
+      margin: 5px 10px;
+      padding: 5px 10px;
+      background: #333;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #speedControl {
+      margin-bottom: 20px;
+    }
+    #speedControl button {
+      font-size: 18px;
+      width: 40px;
+      height: 40px;
+      margin: 0 10px;
+      cursor: pointer;
+    }
+    #startGame {
+      padding: 10px 20px;
+      font-size: 18px;
+      cursor: pointer;
+    }
+    /* Canvas is centered and has a subtle border */
+    #gameCanvas {
+      background: #000;
+      display: block;
+      margin: 0 auto;
+      border: 2px solid #555;
+    }
+    /* Game over overlay */
+    #gameOverOverlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 800px;
+      height: 800px;
+      background: rgba(0,0,0,0.8);
+      color: #fff;
+      display: none;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+    }
+    #gameOverOverlay h1 {
+      font-size: 48px;
+      margin: 10px;
+    }
+    #gameOverOverlay p {
+      font-size: 24px;
+      margin: 10px;
+    }
+    /* Pause menu overlay */
+    #pauseMenu {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #222;
+      padding: 20px;
+      border: 2px solid #555;
+      border-radius: 8px;
+      display: none;
+    }
+    #pauseMenu h1 {
+      margin-top: 0;
+    }
+    #pauseSpeedControl {
+      margin-bottom: 20px;
+    }
+    #pauseSpeedControl button {
+      font-size: 18px;
+      width: 40px;
+      height: 40px;
+      margin: 0 10px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <!-- Start Menu -->
+  <div id="menu">
+    <h1>Lodhia's Space Invaders Math</h1>
+    <div id="options">
+      <h2>Select Operations</h2>
+      <div class="op-buttons">
+        <label><input type="checkbox" id="opAdd" checked> Addition (+)</label>
+        <label><input type="checkbox" id="opSub" checked> Subtraction (–)</label>
+        <label><input type="checkbox" id="opMul" checked> Multiplication (×)</label>
+        <label><input type="checkbox" id="opDiv" checked> Division (÷)</label>
+      </div>
+    </div>
+    <div id="speedControl">
+      <h2>Game Speed</h2>
+      <button id="speedDown">–</button>
+      <span id="speedValue">3</span>
+      <button id="speedUp">+</button>
+    </div>
+    <div>
+      <button id="startGame">Start Game</button>
+      <p>Or press Enter to start</p>
+    </div>
+  </div>
+
+  <!-- Canvas -->
+  <canvas id="gameCanvas" width="800" height="800" style="display:none;"></canvas>
+  <!-- Game Over Overlay -->
+  <div id="gameOverOverlay">
+    <h1>Game Over</h1>
+    <p id="finalScore"></p>
+    <p>Press Escape to return to the menu</p>
+  </div>
+  <!-- Pause Menu Overlay -->
+  <div id="pauseMenu">
+    <h1>Paused</h1>
+    <div id="pauseSpeedControl">
+      <h2>Game Speed</h2>
+      <button id="pauseSpeedDown">–</button>
+      <span id="pauseSpeedValue">3</span>
+      <button id="pauseSpeedUp">+</button>
+    </div>
+    <p>Press R to resume, or Escape to return to the main menu</p>
+  </div>
+
+  <script>
+    "use strict";
+    // ----- Global Variables & Setup -----
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    const menu = document.getElementById("menu");
+    const gameOverOverlay = document.getElementById("gameOverOverlay");
+    const pauseMenu = document.getElementById("pauseMenu");
+    const finalScoreText = document.getElementById("finalScore");
+    const speedValueSpan = document.getElementById("speedValue");
+    const pauseSpeedValueSpan = document.getElementById("pauseSpeedValue");
+    let currentState = "menu"; // "menu", "playing", "paused", "gameover"
+
+    // Game settings from menu:
+    let selectedOps = { add: true, sub: true, mul: true, div: true };
+    let gameSpeed = 3; // from 1 to 5 (falling speed dial; actual fall speed = gameSpeed * 0.25)
+
+    // Game variables:
+    let player, bullets, aliens, explosions, question;
+    let score = 0;
+    let mistakes = 0;
+    const maxMistakes = 15;
+    const alienCount = 5;
+    const fallSpeedFactor = 0.25; // falling speed = gameSpeed * fallSpeedFactor
+    const bulletSpeed = 12; // pixels per frame
+    const playerSpeed = 7; // constant horizontal speed
+
+    // For keyboard input
+    const keys = {};
+
+    // ----- Utility Functions -----
+    function rectCircleCollision(circle, rect) {
+      // circle: {x, y, r}
+      // rect: {x, y, width, height} with x,y at top-left
+      let distX = Math.abs(circle.x - rect.x - rect.width / 2);
+      let distY = Math.abs(circle.y - rect.y - rect.height / 2);
+      if (distX > (rect.width/2 + circle.r)) { return false; }
+      if (distY > (rect.height/2 + circle.r)) { return false; }
+      if (distX <= (rect.width/2)) { return true; } 
+      if (distY <= (rect.height/2)) { return true; }
+      let dx = distX - rect.width/2;
+      let dy = distY - rect.height/2;
+      return (dx*dx + dy*dy <= (circle.r * circle.r));
+    }
+
+    // ----- Classes -----
+    class Player {
+      constructor() {
+        this.width = 50;
+        this.height = 30;
+        this.x = canvas.width / 2;
+        this.y = canvas.height - 50;
+        this.speed = playerSpeed;
+      }
+      update() {
+        if (keys["ArrowLeft"]) {
+          this.x -= this.speed;
+        }
+        if (keys["ArrowRight"]) {
+          this.x += this.speed;
+        }
+        // Clamp within canvas:
+        if (this.x < this.width / 2) this.x = this.width / 2;
+        if (this.x > canvas.width - this.width / 2) this.x = canvas.width - this.width / 2;
+      }
+      draw(ctx) {
+        // Draw as a triangle
+        ctx.fillStyle = "#00F";
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y - this.height / 2);
+        ctx.lineTo(this.x - this.width / 2, this.y + this.height / 2);
+        ctx.lineTo(this.x + this.width / 2, this.y + this.height / 2);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    class Bullet {
+      constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.r = 5;
+        this.speed = bulletSpeed;
+        this.active = true;
+      }
+      update() {
+        this.y -= this.speed;
+        if (this.y < 0) this.active = false;
+      }
+      draw(ctx) {
+        ctx.fillStyle = "#FF0";
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.r, 0, Math.PI*2);
+        ctx.fill();
+      }
+    }
+
+    class Alien {
+      constructor(x, y, number, isCorrect) {
+        this.x = x;
+        this.y = y;
+        this.width = 50;
+        this.height = 40;
+        this.number = number;
+        this.isCorrect = isCorrect;
+        this.alive = true;
+      }
+      update(fallSpeed) {
+        this.y += fallSpeed;
+        // Mark as dead if it leaves the bottom
+        if (this.y - this.height/2 > canvas.height) {
+          this.alive = false;
+        }
+      }
+      draw(ctx) {
+        ctx.fillStyle = "#0A0";
+        ctx.fillRect(this.x - this.width/2, this.y - this.height/2, this.width, this.height);
+        ctx.fillStyle = "#000";
+        ctx.font = "20px Arial";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(this.number, this.x, this.y);
+      }
+      getRect() {
+        return {
+          x: this.x - this.width/2,
+          y: this.y - this.height/2,
+          width: this.width,
+          height: this.height
+        };
+      }
+    }
+
+    class Explosion {
+      constructor(x, y, color) {
+        this.x = x;
+        this.y = y;
+        this.radius = 0;
+        this.maxRadius = 50;
+        this.color = color; // e.g., "#0F0" for correct (green), "#F00" for incorrect (red)
+        this.alpha = 1.0;
+      }
+      update() {
+        this.radius += 2;
+        this.alpha -= 0.03;
+      }
+      draw(ctx) {
+        ctx.save();
+        ctx.globalAlpha = this.alpha;
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+      isFinished() {
+        return this.alpha <= 0;
+      }
+    }
+
+    // ----- Math Question & Alien Generation -----
+    function generateQuestion() {
+      // Get the operations the student selected:
+      let ops = [];
+      if (document.getElementById("opAdd").checked) ops.push("+");
+      if (document.getElementById("opSub").checked) ops.push("-");
+      if (document.getElementById("opMul").checked) ops.push("*");
+      if (document.getElementById("opDiv").checked) ops.push("/");
+      if (ops.length === 0) ops.push("*"); // default if none selected
+
+      let op = ops[Math.floor(Math.random() * ops.length)];
+      let a, b, answer;
+      // For variety, use different ranges for each operation.
+      switch(op) {
+        case "+":
+          a = Math.floor(Math.random() * 20) + 1;
+          b = Math.floor(Math.random() * 20) + 1;
+          answer = a + b;
+          break;
+        case "-":
+          a = Math.floor(Math.random() * 20) + 1;
+          b = Math.floor(Math.random() * a) + 1; // ensure non-negative
+          answer = a - b;
+          break;
+        case "*":
+          a = Math.floor(Math.random() * 12) + 1;
+          b = Math.floor(Math.random() * 12) + 1;
+          answer = a * b;
+          break;
+        case "/":
+          b = Math.floor(Math.random() * 12) + 1;
+          answer = Math.floor(Math.random() * 12) + 1;
+          a = b * answer;
+          break;
+      }
+      return { a, b, op, answer, text: `${a} ${op} ${b} = ?` };
+    }
+
+    function generateAliens(question) {
+      // Create alienCount aliens arranged in a row at y = 50.
+      const aliensArr = [];
+      const margin = 50;
+      const spacing = (canvas.width - 2 * margin) / (alienCount - 1);
+      // Randomly select one index to carry the correct answer.
+      const correctIndex = Math.floor(Math.random() * alienCount);
+      for (let i = 0; i < alienCount; i++) {
+        let x = margin + i * spacing;
+        let y = 50;
+        let num, isCorrect;
+        if (i === correctIndex) {
+          num = question.answer;
+          isCorrect = true;
+        } else {
+          // Generate a distractor that is not equal to the correct answer.
+          do {
+            num = question.answer + Math.floor(Math.random() * 21) - 10;
+          } while (num === question.answer);
+          isCorrect = false;
+        }
+        aliensArr.push(new Alien(x, y, num, isCorrect));
+      }
+      return aliensArr;
+    }
+
+    function newQuestionAndAliens() {
+      question = generateQuestion();
+      aliens = generateAliens(question);
+    }
+
+    // ----- Game Initialization -----
+    function initGame() {
+      score = 0;
+      mistakes = 0;
+      bullets = [];
+      explosions = [];
+      player = new Player();
+      newQuestionAndAliens();
+    }
+
+    // ----- Game Loop Functions -----
+    function updateGame() {
+      // Update player
+      player.update();
+      // Update bullets
+      bullets.forEach(bullet => bullet.update());
+      bullets = bullets.filter(bullet => bullet.active);
+
+      // Update aliens
+      const fallSpeed = gameSpeed * fallSpeedFactor;
+      aliens.forEach(alien => alien.update(fallSpeed));
+
+      // Check for bullet–alien collisions
+      bullets.forEach(bullet => {
+        aliens.forEach(alien => {
+          if (alien.alive) {
+            let circle = { x: bullet.x, y: bullet.y, r: bullet.r };
+            if (rectCircleCollision(circle, alien.getRect())) {
+              if (alien.isCorrect) {
+                explosions.push(new Explosion(alien.x, alien.y, "#0F0")); // green explosion
+                score++;
+                newQuestionAndAliens();
+              } else {
+                explosions.push(new Explosion(alien.x, alien.y, "#F00")); // red explosion
+                mistakes++;
+              }
+              bullet.active = false;
+              alien.alive = false;
+            }
+          }
+        });
+      });
+
+      // Remove aliens that have fallen past the player's area.
+      aliens = aliens.filter(alien => {
+        if (!alien.alive) return false;
+        if (alien.isCorrect && (alien.y + alien.height/2 >= player.y - 10)) {
+          mistakes++;
+          return false;
+        }
+        return true;
+      });
+
+      // If the correct alien is missing, generate a new question.
+      if (!aliens.some(a => a.isCorrect)) {
+        newQuestionAndAliens();
+      }
+
+      // Update explosions
+      explosions.forEach(exp => exp.update());
+      explosions = explosions.filter(exp => !exp.isFinished());
+
+      // Check for game over
+      if (mistakes >= maxMistakes) {
+        currentState = "gameover";
+        gameOverOverlay.style.display = "flex";
+        finalScoreText.textContent = `Final Score: ${score}`;
+      }
+    }
+
+    function drawGame() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.save();
+      ctx.font = "48px Arial";
+      ctx.fillStyle = "rgba(200,200,200,0.9)";
+      ctx.textAlign = "center";
+      ctx.fillText(question.text, canvas.width/2, canvas.height/2);
+      ctx.restore();
+      player.draw(ctx);
+      bullets.forEach(bullet => bullet.draw(ctx));
+      aliens.forEach(alien => alien.draw(ctx));
+      explosions.forEach(exp => exp.draw(ctx));
+      ctx.fillStyle = "#fff";
+      ctx.font = "20px Arial";
+      ctx.textAlign = "left";
+      ctx.fillText("Score: " + score, 10, 25);
+      ctx.fillText("Mistakes: " + mistakes + " / " + maxMistakes, 10, 50);
+    }
+
+    function gameLoop() {
+      if (currentState === "playing") {
+        updateGame();
+        drawGame();
+      }
+      requestAnimationFrame(gameLoop);
+    }
+
+    // ----- Input Handlers -----
+    document.addEventListener("keydown", (e) => {
+      keys[e.key] = true;
+      if (currentState === "menu" && e.key === "Enter") {
+        startPlaying();
+      }
+      if (currentState === "playing" && e.key === " ") {
+        bullets.push(new Bullet(player.x, player.y - player.height/2));
+      }
+      if (currentState === "playing" && e.key === "Escape") {
+        // Pause the game
+        currentState = "paused";
+        pauseMenu.style.display = "block";
+      } else if (currentState === "paused") {
+        if (e.key.toLowerCase() === "r") {
+          // Resume game
+          currentState = "playing";
+          pauseMenu.style.display = "none";
+        } else if (e.key === "Escape") {
+          // Exit to main menu from pause
+          currentState = "menu";
+          pauseMenu.style.display = "none";
+          showMenu();
+        }
+      }
+      if (currentState === "gameover" && e.key === "Escape") {
+        showMenu();
+      }
+    });
+
+    document.addEventListener("keyup", (e) => {
+      keys[e.key] = false;
+    });
+
+    // ----- Menu Controls -----
+    document.getElementById("speedUp").addEventListener("click", () => {
+      if (gameSpeed < 5) { 
+        gameSpeed++; 
+        speedValueSpan.textContent = gameSpeed;
+      }
+    });
+    document.getElementById("speedDown").addEventListener("click", () => {
+      if (gameSpeed > 1) { 
+        gameSpeed--; 
+        speedValueSpan.textContent = gameSpeed;
+      }
+    });
+    document.getElementById("startGame").addEventListener("click", () => {
+      startPlaying();
+    });
+
+    // Pause menu speed controls
+    document.getElementById("pauseSpeedUp").addEventListener("click", () => {
+      if (gameSpeed < 5) { 
+        gameSpeed++; 
+        pauseSpeedValueSpan.textContent = gameSpeed;
+        speedValueSpan.textContent = gameSpeed;
+      }
+    });
+    document.getElementById("pauseSpeedDown").addEventListener("click", () => {
+      if (gameSpeed > 1) { 
+        gameSpeed--; 
+        pauseSpeedValueSpan.textContent = gameSpeed;
+        speedValueSpan.textContent = gameSpeed;
+      }
+    });
+
+    function startPlaying() {
+      selectedOps = {
+        add: document.getElementById("opAdd").checked,
+        sub: document.getElementById("opSub").checked,
+        mul: document.getElementById("opMul").checked,
+        div: document.getElementById("opDiv").checked
+      };
+      menu.style.display = "none";
+      gameOverOverlay.style.display = "none";
+      pauseMenu.style.display = "none";
+      canvas.style.display = "block";
+      currentState = "playing";
+      initGame();
+    }
+
+    function showMenu() {
+      currentState = "menu";
+      menu.style.display = "block";
+      canvas.style.display = "none";
+      gameOverOverlay.style.display = "none";
+      pauseMenu.style.display = "none";
+    }
+
+    // Start the loop
+    requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>
